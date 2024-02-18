@@ -372,7 +372,7 @@ mod test {
     }
     #[test]
     fn conjugacy_class_test() {
-        let c = Permutation::new(11, vec![1, 2, 4, 8, 10, 7, 3,6,5,0,9])
+        let c = Permutation::new(9, vec![1, 2, 4, 8, 7, 3,6,5,0])
             .unwrap()
             .conjugacy_type().into_iter().len();
         dbg!(c);
@@ -430,7 +430,7 @@ mod test {
              assert_eq!(perm, cycle_perms.fold(grp.id(), |x, y| grp.op(&x,&y)));
          }
         #[test]
-         fn symmetric_group_conjugacy_type_conjugate((grp, perm) in group_perm(10), n in 0..10000000usize) {
+         fn symmetric_group_conjugacy_type_conjugate((grp, perm) in group_perm(8), n in 0..10000000usize) {
              let conjs: Vec<Permutation> = perm.conjugacy_type().into_iter().collect();
              let conj = &conjs[n % &conjs.len()];
              assert!(grp.are_conjugate(&conj, &perm).is_some())

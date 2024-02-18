@@ -17,11 +17,11 @@ pub struct Cycle {
     pub vec: Vec<usize>,
 }
 
-impl From<Cycle> for Permutation {
-    fn from(value: Cycle) -> Self {
+impl From<&Cycle> for Permutation {
+    fn from(value: &Cycle) -> Self {
         let i = value.vec.iter();
         let mut v: Vec<usize> = (0..value.degree).collect();
-        for (&n, &m) in i.clone().zip(i.skip(1).cycle()) {
+        for (&n, &m) in i.clone().zip(i.cycle().skip(1)) {
             v[n] = m;
         }
         Permutation {
@@ -187,9 +187,18 @@ impl OrderGroupLike<Permutation> for SymmetricGroup {
 mod test {
     use crate::group::{Group, GroupLike};
     use num::bigint::ToBigUint;
+    use num_traits::Zero;
     use proptest::prelude::*;
 
     use super::*;
+    #[test]
+    fn cycle_test() {
+        let c = Cycle::new(5, vec![0, 1, 2]).unwrap();
+        assert_eq!(
+            Ok(Permutation::from(&c)),
+            Permutation::new(5, vec![1, 2, 0, 3, 4])
+        );
+    }
 
     prop_compose! {
         fn group_perm(k: usize)(n in 0..k)
@@ -200,30 +209,39 @@ mod test {
     }
 
     proptest! {
-          #![proptest_config(ProptestConfig::with_cases(20))]
-          #[test]
-          fn symmetric_group_is_group(n in 0..500usize) {
-              let g = SymmetricGroup {degree : n};
-              Group::<Permutation>::new(
-                  Box::new(move |x,y| g.op(x,y)),
-                  g.id(),
-                  Box::new(move |x| g.inv(x)), Permutation::strategy(n).boxed()).unwrap();
-          }
-          #[test]
-        fn symmetric_group_order(n in 0..10usize) {
-            let g = SymmetricGroup {degree : n};
-            assert_eq!(g.all_elements().len().to_biguint(), Some(g.order()))
-        }
+         #![proptest_config(ProptestConfig::with_cases(20))]
+         #[test]
+         fn symmetric_group_is_group(n in 0..500usize) {
+             let g = SymmetricGroup {degree : n};
+             Group::<Permutation>::new(
+                 Box::new(move |x,y| g.op(x,y)),
+                 g.id(),
+                 Box::new(move |x| g.inv(x)), Permutation::strategy(n).boxed()).unwrap();
+         }
+         #[test]
+         fn symmetric_group_order(n in 0..10usize) {
+             let g = SymmetricGroup {degree : n};
+             assert_eq!(g.all_elements().len().to_biguint(), Some(g.order()))
+         }
 
-          #[test]
-        fn symmetric_group_element_order((grp, perm) in group_perm(100)) {
-            match grp.order_of(&perm).into() {
-                NNInf::Inf => panic!(),
-                NNInf::Fin(a) =>
-                { assert_eq!(grp.power_bigint(&perm, (a.clone()).into()), grp.id()); }
-            }
-
-        }
-
-        }
+         #[test]
+         fn symmetric_group_element_order((grp, perm) in group_perm(100)) {
+             match grp.order_of(&perm).into() {
+                 NNInf::Inf => panic!(),
+                 NNInf::Fin(a) =>
+                 {
+                     assert_eq!(grp.power_bigint(&perm, (a.clone()).into()), grp.id());
+                     if !a.clone().is_zero() {
+                       assert_ne!(grp.power_bigint(&perm, (a.clone() / (2u8)).into()), grp.id());
+                     }
+                 }
+             }
+         }
+         #[test]
+         fn symmetric_group_cycle_decomposition((grp, perm) in group_perm(100)) {
+             let cycles = perm.decompose_cycle();
+             let cycle_perms = cycles.iter().map(|x| Permutation::from(x));
+             assert_eq!(perm, cycle_perms.fold(grp.id(), |x, y| grp.op(&x,&y)));
+         }
+    }
 }

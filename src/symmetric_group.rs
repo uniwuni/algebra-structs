@@ -125,7 +125,7 @@ impl Permutation {
 }
 
 impl GroupLike<Permutation> for SymmetricGroup {
-    fn op(&self, x: Permutation, y: Permutation) -> Permutation {
+    fn op(&self, x: &Permutation, y: &Permutation) -> Permutation {
         assert_eq!(self.degree, x.degree);
         assert_eq!(self.degree, y.degree);
         return Permutation {
@@ -141,7 +141,7 @@ impl GroupLike<Permutation> for SymmetricGroup {
         };
     }
 
-    fn inv(&self, x: Permutation) -> Permutation {
+    fn inv(&self, x: &Permutation) -> Permutation {
         assert_eq!(self.degree, x.degree);
         let mut v: Vec<usize> = vec![0; self.degree];
         for (n, i) in x.vec.iter().enumerate() {
@@ -220,7 +220,7 @@ mod test {
             match grp.order_of(&perm).into() {
                 NNInf::Inf => panic!(),
                 NNInf::Fin(a) =>
-                { assert_eq!(grp.power_bigint(perm, (a.clone()).into()), grp.id()); }
+                { assert_eq!(grp.power_bigint(&perm, (a.clone()).into()), grp.id()); }
             }
 
         }

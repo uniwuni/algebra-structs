@@ -58,6 +58,10 @@ pub trait OrderGroupLike<A>: GroupLike<A> {
     fn order_of(&self, x: &A) -> NNInf;
 }
 
+pub trait ConjugacyGroupLike<A>: GroupLike<A> {
+    /// search a with axa^(-1) = y
+    fn are_conjugate(&self, x: &A, y: &A) -> Option<A>;
+}
 
 pub trait FiniteGroupLike<A>: GroupLike<A> {
     fn order(&self) -> BigUint {

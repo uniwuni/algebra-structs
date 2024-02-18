@@ -55,7 +55,7 @@ pub enum NNInf {
 }
 
 pub trait OrderGroupLike<A>: GroupLike<A> {
-    fn order_of(&self, x: A) -> NNInf;
+    fn order_of(&self, x: &A) -> NNInf;
 }
 
 

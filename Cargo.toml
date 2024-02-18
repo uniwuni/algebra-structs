@@ -6,4 +6,8 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+itertools = "0.12.1"
+num = "0.4.1"
 num-traits = "0.2"
+proptest = "1.4.0"
+rand = "0.8"

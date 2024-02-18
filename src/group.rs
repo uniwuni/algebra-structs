@@ -1,44 +1,172 @@
 use std::collections::HashSet;
 use std::collections::VecDeque;
+use num::BigInt;
+use num::BigUint;
+use num::bigint::ToBigInt;
+use num::bigint::ToBigUint;
+use num_traits::One;
+use num_traits::Zero;
+use proptest::prelude::*;
+use proptest::test_runner::*;
 
-trait GroupLike<A: Copy> {
+pub trait GroupLike<A> {
     fn op(&self, x: A, y: A) -> A;
     fn id(&self) -> A;
     fn inv(&self, x: A) -> A;
-    fn power(&self, x: A, n: i64) -> A {
-        if n == 0 { self.id() }
-        else if n < 0 {
+    fn power(&self, x: A, n: i64) -> A where A: Clone {
+        if n == 0 {
+            self.id()
+        } else if n < 0 {
             self.power(self.inv(x), -n)
-        }
-        else {
+        } else {
             if n == 1 {
                 x
             } else {
                 if n % 2 == 0 {
-                    self.power(self.op(x,x), n / 2)
+                    self.power(self.op(x.clone(), x), n / 2)
                 } else {
-                    self.op(x,self.power(self.op(x,x), n / 2))
+                    self.op(x.clone(), self.power(self.op(x.clone(), x), n / 2))
+                }
+            }
+        }
+    }
+    fn power_bigint(&self, x: A, n: BigInt) -> A where A: Clone {
+        if n == Zero::zero() {
+            self.id()
+        } else if n < Zero::zero() {
+            self.power_bigint(self.inv(x), (-1) * n)
+        } else {
+            if n == One::one() {
+                x
+            } else {
+                if n.clone() % 2 == Zero::zero() {
+                    self.power_bigint(self.op(x.clone(), x), n / 2_i8.to_bigint().unwrap())
+                } else {
+                    self.op(x.clone(), self.power_bigint(self.op(x.clone(), x), n / 2_i8.to_bigint().unwrap()))
                 }
             }
         }
     }
 }
 
-trait FiniteGroupLike<A : Copy>: GroupLike<A> {
-    fn order(&self) -> usize {
-        let all = self.all_elements();
-        all.len()
-    }
-    fn all_elements(&self) -> HashSet<A>;
+pub enum NNInf {
+    Fin(BigUint),
+    Inf
 }
 
-struct Group<A> {
+pub trait OrderGroupLike<A>: GroupLike<A> {
+    fn order_of(&self, x: A) -> NNInf;
+}
+
+
+pub trait FiniteGroupLike<A>: GroupLike<A> {
+    fn order(&self) -> BigUint {
+        let all = self.all_elements();
+        all.len().into()
+    }
+    fn all_elements(&self) -> HashSet<A>;
+    fn bruteforce_order_of(&self, x: A) -> NNInf where A : Clone + PartialEq{
+      let mut y = x.clone();
+      let mut n: u64 = 0;
+      while y != self.id() {
+          y = self.op(y,x.clone());
+          n += 1;
+      }
+      NNInf::Fin(n.to_biguint().unwrap())
+  }
+}
+
+pub struct Group<A> {
     op_fun: Box<dyn Fn(A, A) -> A>,
     id_val: A,
     inv_fun: Box<dyn Fn(A) -> A>,
 }
 
-impl<A: Copy> GroupLike<A> for Group<A> {
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub enum GroupError<A> {
+    TestsRejected(Reason),
+    /// x * (y * z) = (x * y) * z fails.
+    NotAssociative(A, A, A),
+    /// 1 * x = x fails.
+    NotUnitaryLeft(A),
+    /// x * 1 = x fails.
+    NotUnitaryRight(A),
+    /// x^(-1) * x = 1 fails.
+    NotInvertibleLeft(A),
+    /// x * x^(-1) = 1 fails.
+    NotInvertibleRight(A),
+}
+
+impl<A: Clone + Eq + std::fmt::Debug> Group<A> {
+    pub fn new(
+        op: Box<dyn Fn(A, A) -> A>,
+        id: A,
+        inv: Box<dyn Fn(A) -> A>,
+        strategy: BoxedStrategy<A>,
+    ) -> Result<Group<A>, GroupError<A>> {
+        let mut runner = TestRunner::new(proptest::test_runner::Config {
+            failure_persistence: Some(Box::new(proptest::test_runner::FileFailurePersistence::Off)),
+            ..proptest::test_runner::Config::default()
+        });
+        let assoc_result = runner.run(&(&strategy, &strategy, &strategy), |(x, y, z)| {
+            assert_eq!(op(x.clone(), op(y.clone(), z.clone())), op(op(x, y), z));
+            Ok(())
+        });
+        if let Err(TestError::Abort(reason)) = assoc_result {
+            return Err(GroupError::TestsRejected(reason));
+        }
+        if let Err(TestError::Fail(_, (x, y, z))) = assoc_result {
+            return Err(GroupError::NotAssociative(x, y, z));
+        }
+        let unit_left_result = runner.run(&strategy, |x| {
+            assert_eq!(op(id.clone(), x.clone()), x);
+            Ok(())
+        });
+        if let Err(TestError::Abort(reason)) = unit_left_result {
+            return Err(GroupError::TestsRejected(reason));
+        }
+        if let Err(TestError::Fail(_, x)) = unit_left_result {
+            return Err(GroupError::NotUnitaryLeft(x));
+        }
+        let unit_right_result = runner.run(&strategy, |x| {
+            assert_eq!(op(x.clone(), id.clone()), x);
+            Ok(())
+        });
+        if let Err(TestError::Abort(reason)) = unit_right_result {
+            return Err(GroupError::TestsRejected(reason));
+        }
+        if let Err(TestError::Fail(_, x)) = unit_right_result {
+            return Err(GroupError::NotUnitaryRight(x));
+        }
+        let inv_left_result = runner.run(&strategy, |x| {
+            assert_eq!(op(inv(x.clone()), x), id);
+            Ok(())
+        });
+        if let Err(TestError::Abort(reason)) = inv_left_result {
+            return Err(GroupError::TestsRejected(reason));
+        }
+        if let Err(TestError::Fail(_, x)) = inv_left_result {
+            return Err(GroupError::NotInvertibleLeft(x));
+        }
+        let inv_right_result = runner.run(&strategy, |x| {
+            assert_eq!(op(inv(x.clone()), x), id);
+            Ok(())
+        });
+        if let Err(TestError::Abort(reason)) = inv_right_result {
+            return Err(GroupError::TestsRejected(reason));
+        }
+        if let Err(TestError::Fail(_, x)) = inv_right_result {
+            return Err(GroupError::NotInvertibleRight(x));
+        }
+        return Ok(Group {
+            op_fun: op,
+            id_val: id,
+            inv_fun: inv,
+        });
+    }
+}
+
+impl<A: Clone> GroupLike<A> for Group<A> {
     fn op(&self, x: A, y: A) -> A {
         (self.op_fun)(x, y)
     }
@@ -48,10 +176,9 @@ impl<A: Copy> GroupLike<A> for Group<A> {
     }
 
     fn id(&self) -> A {
-        self.id_val
+        self.id_val.clone()
     }
 }
-
 
 struct FinitelyGeneratedGroup<A> {
     group: Group<A>,
@@ -61,7 +188,6 @@ struct FinitelyGeneratedGroup<A> {
 struct FiniteGroup<A> {
     fin_gen_group: FinitelyGeneratedGroup<A>,
 }
-
 
 impl<A> From<FinitelyGeneratedGroup<A>> for Group<A> {
     fn from(value: FinitelyGeneratedGroup<A>) -> Self {
@@ -81,7 +207,10 @@ impl<A> From<FiniteGroup<A>> for Group<A> {
     }
 }
 
-impl<A> GroupLike<A> for FiniteGroup<A> where A: Copy {
+impl<A> GroupLike<A> for FiniteGroup<A>
+where
+    A: Clone,
+{
     fn op(&self, x: A, y: A) -> A {
         (*self.fin_gen_group.group.op_fun)(x, y)
     }
@@ -91,11 +220,14 @@ impl<A> GroupLike<A> for FiniteGroup<A> where A: Copy {
     }
 
     fn id(&self) -> A {
-        self.fin_gen_group.group.id_val
+        self.fin_gen_group.group.id_val.clone()
     }
 }
 
-impl<A> FiniteGroupLike<A> for FiniteGroup<A> where A: Copy + Eq + std::hash::Hash + PartialEq {
+impl<A> FiniteGroupLike<A> for FiniteGroup<A>
+where
+    A: Clone + Eq + std::hash::Hash + PartialEq,
+{
     fn all_elements(&self) -> HashSet<A> {
         let mut elems: HashSet<A> = HashSet::new();
         let mut queue: VecDeque<A> = VecDeque::from([self.id()]);
@@ -103,8 +235,8 @@ impl<A> FiniteGroupLike<A> for FiniteGroup<A> where A: Copy + Eq + std::hash::Ha
             if elems.contains(&x) {
                 continue;
             } else {
-                elems.insert(x);
-                queue.extend(self.fin_gen_group.generators.iter().map(|s| self.op(x,*s)));
+                elems.insert(x.clone());
+                queue.extend(self.fin_gen_group.generators.iter().map(|s| self.op(x.clone(), s.clone())));
             }
         }
         elems
@@ -128,16 +260,18 @@ impl<A: Copy> GroupLike<A> for FinitelyGeneratedGroup<A> {
 mod test {
     use std::collections::HashSet;
 
+    use num::BigUint;
+
     use crate::group::FiniteGroupLike;
 
-    use super::{Group, FiniteGroup, FinitelyGeneratedGroup};
+    use super::{FiniteGroup, FinitelyGeneratedGroup, Group};
 
     #[test]
     fn elems_mod_5() {
         let grp_mod_5: Group<i8> = Group {
-            op_fun: Box::new(|x,y| (x + y) % 5),
+            op_fun: Box::new(|x, y| (x + y) % 5),
             id_val: 0,
-            inv_fun: Box::new(|x| (- x) % 5),
+            inv_fun: Box::new(|x| (-x) % 5),
         };
         let finite_grp_mod_5: FiniteGroup<i8> = FiniteGroup {
             fin_gen_group: FinitelyGeneratedGroup {
@@ -145,21 +279,21 @@ mod test {
                 generators: vec![1],
             },
         };
-        assert!(finite_grp_mod_5.all_elements() == HashSet::from([0,1,2,3,4]));
+        assert!(finite_grp_mod_5.all_elements() == HashSet::from([0, 1, 2, 3, 4]));
     }
     #[test]
     fn elems_sym_3() {
-        let grp_sym_3: Group<[usize;3]> = Group {
-            op_fun: Box::new(|x,y| [x[y[0]], x[y[1]], x[y[2]]]),
-            id_val: [0,1,2],
+        let grp_sym_3: Group<[usize; 3]> = Group {
+            op_fun: Box::new(|x, y| [x[y[0]], x[y[1]], x[y[2]]]),
+            id_val: [0, 1, 2],
             inv_fun: Box::new(|x| x), // TODO
         };
-        let finite_grp_sym_3: FiniteGroup<[usize;3]> = FiniteGroup {
+        let finite_grp_sym_3: FiniteGroup<[usize; 3]> = FiniteGroup {
             fin_gen_group: FinitelyGeneratedGroup {
                 group: grp_sym_3,
-                generators: vec![[1,0,2],[2,1,0]],
+                generators: vec![[1, 0, 2], [2, 1, 0]],
             },
         };
-        assert_eq!(finite_grp_sym_3.order(), 6);
+        assert_eq!(finite_grp_sym_3.order(), BigUint::from(6 as u8));
     }
 }

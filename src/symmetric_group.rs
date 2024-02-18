@@ -1,5 +1,5 @@
 use itertools::Itertools;
-use num::{bigint::ToBigUint, BigUint, Integer};
+use num::{bigint::ToBigUint, BigUint, Integer, integer::binomial};
 use proptest::strategy::Strategy;
 
 use super::group::*;
@@ -183,10 +183,8 @@ impl ConjugacyType {
             if len == 0 {
                 return vec![vec![]];
             }
-            let options = remaining.iter().combinations(len).map(|x| Cycle {
-                degree,
-                vec: x.iter().copied().copied().collect(),
-            });
+            let options = remaining.iter().permutations(len)
+                                          .map(|x| Cycle::new(degree, x.iter().copied().copied().collect()).unwrap()).unique();
             options
                 .map(|x| {
                     let new_remaining =
@@ -201,12 +199,25 @@ impl ConjugacyType {
                 .collect()
         }
     }
+    pub fn len(&self) -> BigUint {
+        let cs = self.uncount();
+        let mut n = 1.to_biguint().unwrap();
+        let mut remaining = self.degree;
+        for c in cs {
+            let m: usize = (remaining-c+1..remaining+1).product::<usize>()/c;
+            if m != 0 {
+                n *= m.to_biguint().unwrap();
+            }
+            remaining -= c;
+        }
+        n
+    }
 }
 
 impl IntoIterator for ConjugacyType {
     type Item = Permutation;
 
-    type IntoIter = std::vec::IntoIter<Permutation>; //goofy ass
+    type IntoIter = std::vec::IntoIter<Permutation>;
 
     fn into_iter(self) -> Self::IntoIter {
         let v = Self::make_from_remaining(self.degree, self.uncount(), (0..self.degree).collect());
@@ -335,6 +346,7 @@ mod test {
     use num::bigint::ToBigUint;
     use num_traits::Zero;
     use proptest::prelude::*;
+    use rand::seq::index::IndexVecIter;
 
     use super::*;
     #[test]
@@ -360,16 +372,24 @@ mod test {
     }
     #[test]
     fn conjugacy_class_test() {
-        let c = Permutation::new(5, vec![1, 2, 0, 4, 3])
+        let c = Permutation::new(11, vec![1, 2, 4, 8, 10, 7, 3,6,5,0,9])
             .unwrap()
-            .conjugacy_type();
-        dbg!(c.into_iter().collect::<Vec<_>>());
+            .conjugacy_type().into_iter().len();
+        dbg!(c);
+
     }
     prop_compose! {
         fn group_perm(k: usize)(n in 0..k)
                         (grp in Just(SymmetricGroup {degree : n}), perm in Permutation::strategy(n))
                         -> (SymmetricGroup, Permutation) {
            (grp, perm)
+       }
+    }
+    prop_compose! {
+       fn group_perm2(k: usize)(n in 0..k)
+                        (grp in Just(SymmetricGroup {degree : n}), perm in Permutation::strategy(n), perm2 in Permutation::strategy(n))
+                        -> (SymmetricGroup, Permutation, Permutation) {
+           (grp, perm, perm2)
        }
     }
 
@@ -388,7 +408,8 @@ mod test {
              let g = SymmetricGroup {degree : n};
              assert_eq!(g.all_elements().len().to_biguint(), Some(g.order()))
          }
-
+    }
+    proptest! {
          #[test]
          fn symmetric_group_element_order((grp, perm) in group_perm(100)) {
              match grp.order_of(&perm).into() {
@@ -407,6 +428,25 @@ mod test {
              let cycles = perm.decompose_cycle();
              let cycle_perms = cycles.iter().map(|x| Permutation::from(x));
              assert_eq!(perm, cycle_perms.fold(grp.id(), |x, y| grp.op(&x,&y)));
+         }
+        #[test]
+         fn symmetric_group_conjugacy_type_conjugate((grp, perm) in group_perm(10), n in 0..10000000usize) {
+             let conjs: Vec<Permutation> = perm.conjugacy_type().into_iter().collect();
+             let conj = &conjs[n % &conjs.len()];
+             assert!(grp.are_conjugate(&conj, &perm).is_some())
+         }
+        #[test]
+         fn symmetric_group_conjugate_in_conjugacy_type((grp, perm, perm2) in group_perm2(8)) {
+
+             let mut conjs = perm.conjugacy_type().into_iter();
+             let conjugate = grp.op(&grp.inv(&perm2), &grp.op(&perm, &perm2));
+
+             assert!(conjs.contains(&conjugate));
+         }
+        #[test]
+         fn symmetric_group_conjugacy_type_size((_, perm) in group_perm(8)) {
+             let conj = perm.conjugacy_type();
+             assert_eq!(conj.len(),conj.into_iter().len().into());
          }
     }
 }

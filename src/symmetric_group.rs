@@ -7,7 +7,7 @@ use crate::misc::NNInf;
 
 use super::group::*;
 use rand::seq::SliceRandom;
-use std::collections::{HashMap, HashSet};
+use std::{collections::{HashMap, HashSet}, convert::identity};
 
 /// Symmetric groups of a given `degree`.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -237,31 +237,30 @@ impl ConjugacyType {
         degree: usize,
         cycles: Vec<usize>,
         remaining: &HashSet<usize>,
-    ) -> Vec<Vec<Cycle>> {
+    ) -> impl Iterator<Item = Vec<Cycle>> + '_ {
         let mut cycles = cycles;
         if remaining.is_empty() {
-            vec![SymmetricGroup { degree }.id().decompose_cycle()]
+            itertools::Either::Left(std::iter::once(SymmetricGroup { degree }.id().decompose_cycle()))
         } else {
             let len = cycles.pop().unwrap();
             if len == 0 {
-                return vec![vec![]];
+                return itertools::Either::Left(std::iter::once(vec![]));
             }
-            let options = remaining
+            let options: itertools::Unique<_> = remaining
                 .iter()
                 .permutations(len)
-                .map(|x| Cycle::new_no_check(degree, x.iter().copied().copied().collect()))
+                .map(move |x| Cycle::new_no_check(degree, x.iter().copied().copied().collect()))
                 .unique();
-            options
-                .flat_map(|x| {
+            itertools::Either::Right(options
+                .flat_map(move |x| {
                     let new_remaining =
                         remaining - &x.vec.iter().copied().collect::<HashSet<usize>>();
-                    let mut res = Self::make_from_remaining(degree, cycles.clone(), &new_remaining);
+                    let mut res: Vec<_> = Self::make_from_remaining(degree, cycles.clone(), &new_remaining).collect();
                     for m in &mut res {
                         m.push(x.clone());
                     }
                     res
-                })
-                .collect()
+                }))
         }
     }
     pub fn len(&self) -> BigUint {
@@ -282,19 +281,17 @@ impl ConjugacyType {
 impl IntoIterator for ConjugacyType {
     type Item = Permutation;
 
-    type IntoIter = std::vec::IntoIter<Permutation>;
+    type IntoIter = Box<dyn Iterator<Item = Permutation>>;
 
     fn into_iter(self) -> Self::IntoIter {
-        Self::make_from_remaining(self.degree, self.uncount(), &(0..self.degree).collect())
-            .iter()
+        let range: HashSet<usize> = (0..self.degree).collect();
+        Box::new(Self::make_from_remaining(self.degree, self.uncount(), &range)
             .map(move |a| {
                 let s = SymmetricGroup {
                     degree: self.degree,
                 };
                 a.iter().fold(s.id(), |x, y| s.op(&x, &y.into()))
-            })
-            .collect::<Vec<_>>()
-            .into_iter()
+            }))
     }
 }
 
@@ -430,7 +427,7 @@ mod test {
             .unwrap()
             .conjugacy_type()
             .into_iter()
-            .len();
+            .count();
         dbg!(c);
     }
     prop_compose! {

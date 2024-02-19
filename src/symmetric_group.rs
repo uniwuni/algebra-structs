@@ -7,7 +7,7 @@ use crate::misc::NNInf;
 
 use super::group::*;
 use rand::seq::SliceRandom;
-use std::{collections::{HashMap, HashSet}, convert::identity};
+use std::collections::{HashMap, HashSet};
 
 /// Symmetric groups of a given `degree`.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]

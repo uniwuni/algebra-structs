@@ -1,8 +1,14 @@
 [package]
 name = "algebra-structs"
-version = "0.1.0"
+version = "0.0.1"
 edition = "2021"
-
+authors = ["uni <uniwuni@protonmail.com>"]
+description = "Implementation of computational algebra, for example, group theory and ring theory."
+repository = "https://github.com/uniwuni/algebra-structs"
+license = "GPL-2.0-or-later"
+keywords = ["math","algebra","groups","rings"]
+categories = ["mathematics"]
+readme = "README.md"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
@@ -11,3 +17,12 @@ num = "0.4.1"
 num-traits = "0.2"
 proptest = "1.4.0"
 rand = "0.8"
+
+[lints.clippy]
+pedantic = "warn"
+nursery = "warn"
+cargo = "warn"
+assertions_on_result_states = "warn"
+module_name_repetitions = "allow"
+type_complexity = "allow"
+redundant_clone = "allow"

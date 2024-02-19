@@ -1,48 +1,66 @@
 use itertools::Itertools;
 use num::{bigint::ToBigUint, BigUint, Integer};
+use num_traits::One;
 use proptest::strategy::Strategy;
+
+use crate::misc::NNInf;
 
 use super::group::*;
 use rand::seq::SliceRandom;
 use std::collections::{HashMap, HashSet};
 
+/// Symmetric groups of a given `degree`.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct SymmetricGroup {
     pub degree: usize,
 }
 
 #[derive(Clone, Debug, Hash, PartialEq, Eq)]
+#[non_exhaustive]
+/// Cyclic permutations of a given `degree`.
 pub struct Cycle {
     pub degree: usize,
     pub vec: Vec<usize>,
 }
 
 impl From<&Cycle> for Permutation {
+    /// Turn cycles into permutations in the canonical way.
+    /// # Runtime
+    /// O(2 ord(value))
     fn from(value: &Cycle) -> Self {
         let i = value.vec.iter();
         let mut v: Vec<usize> = (0..value.degree).collect();
         for (&n, &m) in i.clone().zip(i.cycle().skip(1)) {
             v[n] = m;
         }
-        Permutation {
+        Self {
             degree: value.degree,
             vec: v,
         }
     }
 }
+
 impl From<Cycle> for Permutation {
+    /// Turn cycles into permutations in the canonical way.
+    /// # Runtime
+    /// O(2 ord(value))
     fn from(value: Cycle) -> Self {
         (&value).into()
     }
 }
 impl Cycle {
-    pub fn new(degree: usize, vec: Vec<usize>) -> Result<Cycle, PermutationError> {
+    /// Returns a permutation of `degree` that cycles through the given `vec` in order.
+    /// This normalizes the cycle so it starts with the lowest element, thus `Cycle::new(degree,vec).vec == vec`
+    /// does not always hold.
+    /// # Errors
+    /// * If some element of the vector is too big for the symmetric group to act on, a [`PermutationError::NotBounded`] is returned.
+    /// * If a value appears twice, a [`PermutationError::NotInjective`] is returned.
+    /// # Runtime
+    /// O(`degree`), worst-case three iterations through `vec`.
+    pub fn new(degree: usize, vec: Vec<usize>) -> Result<Self, PermutationError> {
         let mut vec = vec;
         let mut set: HashSet<usize> = HashSet::new();
         let l = vec.len();
-        if l > degree {
-            return Err(PermutationError::WrongSize);
-        }
         for &x in &vec {
             if x >= degree {
                 return Err(PermutationError::NotBounded);
@@ -55,23 +73,43 @@ impl Cycle {
         if let Some(n) = vec.iter().position_min() {
             vec.rotate_left(n); // normalize start position
         }
-        Ok(Cycle { degree, vec })
+        Ok(Self { degree, vec })
     }
-    fn new_no_check(degree: usize, vec: Vec<usize>) -> Cycle {
+    fn new_no_check(degree: usize, vec: Vec<usize>) -> Self {
         let mut vec = vec;
         if let Some(n) = vec.iter().position_min() {
             vec.rotate_left(n); // normalize start position
         }
-        Cycle { degree, vec }
+        Self { degree, vec }
     }
+    /// Order of a cycle as a permutation.
+    /// # Runtime
+    /// O(1).
     pub fn order(&self) -> usize {
         self.vec.len()
     }
-
-    pub fn inv(self) -> Cycle {
+    /// Inverse of a cycle as a cycle.
+    /// # Runtime
+    /// O(`degree`) due to reversal, up to 3 iterations due to normalization.
+    pub fn inv(self) -> Self {
         let mut s = self.vec;
         s.reverse();
         Self::new_no_check(self.degree, s)
+    }
+
+    /// Proptest [`Strategy`] to generate cycles.
+    /// Not really uniform, but uniform in cycle length and per length uniform in value.
+    pub fn strategy(degree: usize) -> impl Strategy<Value = Self> {
+        (0..degree).prop_perturb(move |n, mut rng| {
+            let mut vec: Vec<usize> = (0..degree).collect();
+            vec.shuffle(&mut rng);
+            vec.truncate(n);
+            Self::new_no_check(degree, vec)
+        })
+    }
+    // potential generalization????
+    pub fn strategy_up_to(degree: usize) -> impl Strategy<Value = (usize, Self)> {
+        (0..degree).prop_flat_map(|n| (proptest::strategy::Just(n), Self::strategy(n)))
     }
 }
 
@@ -97,7 +135,12 @@ impl std::ops::Index<usize> for Permutation {
 }
 
 impl Permutation {
-    pub fn new(degree: usize, vec: Vec<usize>) -> Result<Permutation, PermutationError> {
+    /// Returns a new permutation given the `degree` and a `vec` of how it acts on `0..degree`.
+    /// # Errors
+    /// * [`PermutationError::WrongSize`] if `vec.len() != degree`.
+    /// * [`PermutationError::NotBounded`] if some value in `vec` is greater or equal to `degree`.
+    /// * [`PermutationError::NotInjective`9 if some value in `vec` appears twice.
+    pub fn new(degree: usize, vec: Vec<usize>) -> Result<Self, PermutationError> {
         let mut set: HashSet<usize> = HashSet::new();
         if vec.len() != degree {
             return Err(PermutationError::WrongSize);
@@ -111,19 +154,24 @@ impl Permutation {
         if set.len() != degree {
             return Err(PermutationError::NotInjective);
         }
-        Ok(Permutation { degree, vec })
+        Ok(Self { degree, vec })
     }
 
-    pub fn strategy(degree: usize) -> impl Strategy<Value = Permutation> {
+    pub fn strategy(degree: usize) -> impl Strategy<Value = Self> {
         (0..1).prop_perturb(move |_, mut rng| {
             let mut vec: Vec<usize> = (0..degree).collect();
             vec.shuffle(&mut rng);
-            Permutation { degree, vec }
+            Self { degree, vec }
         })
     }
-
+    pub fn strategy_up_to(degree: usize) -> impl Strategy<Value = (usize, Self)> {
+        (0..degree).prop_flat_map(|n| (proptest::strategy::Just(n), Self::strategy(n)))
+    }
+    pub fn strategy_up_to2(degree: usize) -> impl Strategy<Value = (usize, Self, Self)> {
+        (0..degree).prop_flat_map(|n| (proptest::strategy::Just(n), Self::strategy(n), Self::strategy(n)))
+    }
     pub fn decompose_cycle(&self) -> Vec<Cycle> {
-        let mut unvisited: HashSet<usize> = HashSet::from_iter(0..self.degree);
+        let mut unvisited: HashSet<usize> = (0..self.degree).collect();
         let mut cycles: Vec<Cycle> = vec![];
         while let Some(&start) = unvisited.iter().min() {
             let mut m: usize = start; // kind of hacky but who care
@@ -156,20 +204,22 @@ pub enum ConjugacyTypeError {
 }
 
 impl ConjugacyType {
-    pub fn new(
-        degree: usize,
-        amounts: HashMap<usize, usize>,
-    ) -> Result<ConjugacyType, ConjugacyTypeError> {
+    /// Given a `degree` and a hashmap of how often each cycle length occurs, return the conjugacy type defined
+    /// by these cycle lengths. Note that fixpoints have cycle length 1.
+    /// # Errors
+    /// Yields a [`ConjugacyTypeError::SumWrong`] if the sum of all cycle lengths
+    /// (that is all key-value products) does not equal the degree.
+    pub fn new(degree: usize, amounts: HashMap<usize, usize>) -> Result<Self, ConjugacyTypeError> {
         let mut amounts = amounts;
         amounts.remove(&0);
         let mut inferred_degree = 0;
         for (cycle_length, amount) in &amounts {
             inferred_degree += cycle_length * amount;
         }
-        if inferred_degree != degree {
-            Err(ConjugacyTypeError::SumWrong)
+        if inferred_degree == degree {
+            Ok(Self { degree, amounts })
         } else {
-            Ok(ConjugacyType { degree, amounts })
+            Err(ConjugacyTypeError::SumWrong)
         }
     }
 
@@ -186,7 +236,7 @@ impl ConjugacyType {
     fn make_from_remaining(
         degree: usize,
         cycles: Vec<usize>,
-        remaining: HashSet<usize>,
+        remaining: &HashSet<usize>,
     ) -> Vec<Vec<Cycle>> {
         let mut cycles = cycles;
         if remaining.is_empty() {
@@ -204,11 +254,11 @@ impl ConjugacyType {
             options
                 .flat_map(|x| {
                     let new_remaining =
-                        &remaining.clone() - &x.vec.iter().copied().collect::<HashSet<usize>>();
-                    let mut res = Self::make_from_remaining(degree, cycles.clone(), new_remaining);
-                    res.iter_mut().for_each(|m| {
+                        remaining - &x.vec.iter().copied().collect::<HashSet<usize>>();
+                    let mut res = Self::make_from_remaining(degree, cycles.clone(), &new_remaining);
+                    for m in &mut res {
                         m.push(x.clone());
-                    });
+                    }
                     res
                 })
                 .collect()
@@ -216,12 +266,12 @@ impl ConjugacyType {
     }
     pub fn len(&self) -> BigUint {
         let cs = self.uncount();
-        let mut n = 1.to_biguint().unwrap();
+        let mut n = BigUint::one();
         let mut remaining = self.degree;
         for c in cs {
-            let m: usize = (remaining - c + 1..remaining + 1).product::<usize>() / c;
+            let m: usize = ((remaining - c + 1)..=remaining).product::<usize>() / c;
             if m != 0 {
-                n *= m.to_biguint().unwrap();
+                n *= BigUint::from(m);
             }
             remaining -= c;
         }
@@ -235,7 +285,7 @@ impl IntoIterator for ConjugacyType {
     type IntoIter = std::vec::IntoIter<Permutation>;
 
     fn into_iter(self) -> Self::IntoIter {
-        Self::make_from_remaining(self.degree, self.uncount(), (0..self.degree).collect())
+        Self::make_from_remaining(self.degree, self.uncount(), &(0..self.degree).collect())
             .iter()
             .map(move |a| {
                 let s = SymmetricGroup {
@@ -293,20 +343,18 @@ impl GroupLike<Permutation> for SymmetricGroup {
 }
 
 impl FiniteGroupLike<Permutation> for SymmetricGroup {
-    fn all_elements(&self) -> HashSet<Permutation> {
-        HashSet::from_iter(
-            (0..(self.degree))
-                .permutations(self.degree)
-                .map(|x| Permutation {
-                    degree: self.degree,
-                    vec: x,
-                }),
-        )
+    fn all_elements(&self) -> impl Iterator<Item = Permutation> {
+        (0..(self.degree))
+            .permutations(self.degree)
+            .map(|x| Permutation {
+                degree: self.degree,
+                vec: x,
+            })
     }
     fn order(&self) -> num::BigUint {
         let mut n: BigUint = num_traits::One::one();
-        for i in 1..(self.degree + 1) {
-            n *= i.to_biguint().unwrap();
+        for i in 1..=self.degree {
+            n *= BigUint::from(i);
         }
         n
     }
@@ -319,7 +367,7 @@ impl OrderGroupLike<Permutation> for SymmetricGroup {
             .decompose_cycle()
             .into_iter()
             .map(|a| a.order().to_biguint().unwrap());
-        NNInf::Fin(orders.fold(num_traits::Zero::zero(), |x, y| y.lcm(&x)))
+        NNInf::Fin(orders.fold(num_traits::Zero::zero(), |x, y: BigUint| y.lcm(&x)))
     }
 }
 
@@ -328,37 +376,34 @@ impl ConjugacyGroupLike<Permutation> for SymmetricGroup {
         assert_eq!(self.degree, x.degree);
         assert_eq!(self.degree, y.degree);
         if x.conjugacy_type() != y.conjugacy_type() {
-            None
-        } else {
-            let dx = Permutation {
-                degree: self.degree,
-                vec: x
-                    .decompose_cycle()
-                    .iter()
-                    .flat_map(|x| &x.vec)
-                    .copied()
-                    .collect(),
-            };
-            let dy = Permutation {
-                degree: self.degree,
-                vec: y
-                    .decompose_cycle()
-                    .iter()
-                    .flat_map(|x| &x.vec)
-                    .copied()
-                    .collect(),
-            };
-            Some(self.op(&dy, &self.inv(&dx)))
+            return None;
         }
+        let dx = Permutation {
+            degree: self.degree,
+            vec: x
+                .decompose_cycle()
+                .iter()
+                .flat_map(|x| &x.vec)
+                .copied()
+                .collect(),
+        };
+        let dy = Permutation {
+            degree: self.degree,
+            vec: y
+                .decompose_cycle()
+                .iter()
+                .flat_map(|x| &x.vec)
+                .copied()
+                .collect(),
+        };
+        Some(self.op(&dy, &self.inv(&dx)))
     }
 }
 
 mod test {
-    use crate::group::{Group, GroupLike};
-    use num::bigint::ToBigUint;
+    #[allow(unused_imports)]
     use num_traits::Zero;
     use proptest::prelude::*;
-    use rand::seq::index::IndexVecIter;
 
     use super::*;
     #[test]
@@ -402,8 +447,8 @@ mod test {
            (grp, perm, perm2)
        }
     }
-
     proptest! {
+
          #![proptest_config(ProptestConfig::with_cases(20))]
          #[test]
          fn symmetric_group_is_group(n in 0..500usize) {
@@ -411,17 +456,18 @@ mod test {
              Group::<Permutation>::new(
                  Box::new(move |x,y| g.op(x,y)),
                  g.id(),
-                 Box::new(move |x| g.inv(x)), Permutation::strategy(n).boxed()).unwrap();
+                 Box::new(move |x| g.inv(x)), &Permutation::strategy(n).boxed()).unwrap();
          }
          #[test]
-         fn symmetric_group_order(n in 0..10usize) {
+         fn symmetric_group_order(n in 0..9usize) {
              let g = SymmetricGroup {degree : n};
-             assert_eq!(g.all_elements().len().to_biguint(), Some(g.order()))
+             assert_eq!(g.all_elements().count().to_biguint(), Some(g.order()))
          }
     }
     proptest! {
          #[test]
-         fn symmetric_group_element_order((grp, perm) in group_perm(100)) {
+         fn symmetric_group_element_order((n, perm) in Permutation::strategy_up_to(100)){
+             let grp = SymmetricGroup { degree: n };
              match grp.order_of(&perm) {
                  NNInf::Inf => panic!(),
                  NNInf::Fin(a) =>
@@ -434,29 +480,37 @@ mod test {
              }
          }
          #[test]
-         fn symmetric_group_cycle_decomposition((grp, perm) in group_perm(100)) {
+         fn symmetric_group_cycle_decomposition((n, perm) in Permutation::strategy_up_to(10000)) {
+             let grp = SymmetricGroup { degree: n };
              let cycles = perm.decompose_cycle();
              let cycle_perms = cycles.iter().map(Permutation::from);
              assert_eq!(perm, cycle_perms.fold(grp.id(), |x, y| grp.op(&x,&y)));
          }
         #[test]
-         fn symmetric_group_conjugacy_type_conjugate((grp, perm) in group_perm(8), n in 0..10000000usize) {
+         fn symmetric_group_conjugacy_type_conjugate((k, perm) in Permutation::strategy_up_to(9), n in 0..10000000usize) {
+             let grp = SymmetricGroup { degree: k };
              let conjs: Vec<Permutation> = perm.conjugacy_type().into_iter().collect();
              let conj = &conjs[n % conjs.len()];
              assert!(grp.are_conjugate(conj, &perm).is_some())
          }
         #[test]
-         fn symmetric_group_conjugate_in_conjugacy_type((grp, perm, perm2) in group_perm2(9)) {
-
+         fn symmetric_group_conjugate_in_conjugacy_type((k, perm, perm2) in Permutation::strategy_up_to2(9)) {
+             let grp = SymmetricGroup { degree: k };
              let mut conjs = perm.conjugacy_type().into_iter();
              let conjugate = grp.op(&grp.inv(&perm2), &grp.op(&perm, &perm2));
 
              assert!(conjs.contains(&conjugate));
          }
         #[test]
-         fn symmetric_group_conjugacy_type_size((_, perm) in group_perm(8)) {
+         fn symmetric_group_conjugacy_type_size((_, perm) in Permutation::strategy_up_to(9)) {
              let conj = perm.conjugacy_type();
              assert_eq!(conj.len(),conj.into_iter().len().into());
          }
+        #[test]
+        fn cycle_inv_to_perm_commute((n, cycle) in Cycle::strategy_up_to(256)) {
+            let grp = SymmetricGroup { degree: n };
+            assert_eq!(Permutation::from(cycle.clone().inv()), grp.inv(&Permutation::from(cycle)));
+
+        }
     }
 }

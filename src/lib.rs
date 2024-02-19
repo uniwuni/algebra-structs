@@ -1,2 +1,3 @@
-mod group;
-mod symmetric_group;
+pub mod misc;
+pub mod group;
+pub mod symmetric_group;

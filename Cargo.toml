@@ -26,3 +26,9 @@ assertions_on_result_states = "warn"
 module_name_repetitions = "allow"
 type_complexity = "allow"
 redundant_clone = "allow"
+
+[profile.release]
+debug = true
+
+[features]
+intensive_test = []

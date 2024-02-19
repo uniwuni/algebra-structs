@@ -26,7 +26,7 @@ pub struct Cycle {
 impl From<&Cycle> for Permutation {
     /// Turn cycles into permutations in the canonical way.
     /// # Runtime
-    /// O(2 ord(value))
+    /// O(ord(value)), about 2 ord(value) steps.
     fn from(value: &Cycle) -> Self {
         let i = value.vec.iter();
         let mut v: Vec<usize> = (0..value.degree).collect();
@@ -43,7 +43,7 @@ impl From<&Cycle> for Permutation {
 impl From<Cycle> for Permutation {
     /// Turn cycles into permutations in the canonical way.
     /// # Runtime
-    /// O(2 ord(value))
+    /// O(ord(value)), about 2 ord(value) steps.
     fn from(value: Cycle) -> Self {
         (&value).into()
     }
@@ -97,7 +97,7 @@ impl Cycle {
         Self::new_no_check(self.degree, s)
     }
 
-    /// Proptest [`Strategy`] to generate cycles.
+    /// Proptest [`Strategy`] to generate cycles of given `degree`.
     /// Not really uniform, but uniform in cycle length and per length uniform in value.
     pub fn strategy(degree: usize) -> impl Strategy<Value = Self> {
         (0..=degree).prop_perturb(move |n, mut rng| {
@@ -107,7 +107,7 @@ impl Cycle {
             Self::new_no_check(degree, vec)
         })
     }
-    // potential generalization????
+    /// Proptest [`Strategy`] to generate cycles up to given `degree` as well as the corresponding degree.
     pub fn strategy_up_to(degree: usize) -> impl Strategy<Value = (usize, Self)> {
         (0..degree).prop_flat_map(|n| (proptest::strategy::Just(n), Self::strategy(n)))
     }
@@ -134,12 +134,14 @@ impl std::ops::Index<usize> for Permutation {
     }
 }
 
+/// Represents a permutation in some (finite) symmetric group.
+/// The degree of the group is part of the permutation data to avoid complicated type level machinery.
 impl Permutation {
     /// Returns a new permutation given the `degree` and a `vec` of how it acts on `0..degree`.
     /// # Errors
     /// * [`PermutationError::WrongSize`] if `vec.len() != degree`.
     /// * [`PermutationError::NotBounded`] if some value in `vec` is greater or equal to `degree`.
-    /// * [`PermutationError::NotInjective`9 if some value in `vec` appears twice.
+    /// * [`PermutationError::NotInjective`] if some value in `vec` appears twice.
     pub fn new(degree: usize, vec: Vec<usize>) -> Result<Self, PermutationError> {
         let mut set: HashSet<usize> = HashSet::new();
         if vec.len() != degree {
@@ -156,7 +158,8 @@ impl Permutation {
         }
         Ok(Self { degree, vec })
     }
-
+    /// Proptest [`Strategy`] to generate permutations of given `degree`.
+    /// More or less uniform.
     pub fn strategy(degree: usize) -> impl Strategy<Value = Self> {
         (0..1).prop_perturb(move |_, mut rng| {
             let mut vec: Vec<usize> = (0..degree).collect();
@@ -164,12 +167,19 @@ impl Permutation {
             Self { degree, vec }
         })
     }
+    /// Proptest [`Strategy`] to generate permutations of degree less than `degree`.
+    /// Uniform in the degree.
     pub fn strategy_up_to(degree: usize) -> impl Strategy<Value = (usize, Self)> {
         (0..degree).prop_flat_map(|n| (proptest::strategy::Just(n), Self::strategy(n)))
     }
+    /// Proptest [`Strategy`] to generate two permutations of degree less than `degree`.
+    /// Uniform in the degree.
     pub fn strategy_up_to2(degree: usize) -> impl Strategy<Value = (usize, Self, Self)> {
         (0..degree).prop_flat_map(|n| (proptest::strategy::Just(n), Self::strategy(n), Self::strategy(n)))
     }
+    /// Decompose the permutation into [`Cycle`]s. These are ordered by length.
+    /// # Runtime
+    /// Approximately O(n log n) due to HashSet usage.
     pub fn decompose_cycle(&self) -> Vec<Cycle> {
         let mut unvisited: HashSet<usize> = (0..self.degree).collect();
         let mut cycles: Vec<Cycle> = vec![];
@@ -263,6 +273,9 @@ impl ConjugacyType {
                 }))
         }
     }
+    /// Compute cardinality of conjugacy type.
+    /// # Runtime
+    /// Approximately O(n)
     pub fn len(&self) -> BigUint {
         let cs = self.uncount();
         let mut n = BigUint::one();
@@ -278,11 +291,13 @@ impl ConjugacyType {
     }
 }
 
+
 impl IntoIterator for ConjugacyType {
     type Item = Permutation;
 
     type IntoIter = Box<dyn Iterator<Item = Permutation>>;
-
+    // TODO write a proper iterator
+    /// Yield all elements of a certain conjugacy type.
     fn into_iter(self) -> Self::IntoIter {
         let range: HashSet<usize> = (0..self.degree).collect();
         Box::new(Self::make_from_remaining(self.degree, self.uncount(),range)
@@ -296,6 +311,7 @@ impl IntoIterator for ConjugacyType {
 }
 
 impl Permutation {
+    /// Compute conjugacy type by using the cycle decomposition
     fn conjugacy_type(&self) -> ConjugacyType {
         let orders = self
             .decompose_cycle()
@@ -310,6 +326,9 @@ impl Permutation {
 }
 
 impl GroupLike<Permutation> for SymmetricGroup {
+    /// Computes the composition of two permutations such that `self.op(x,y)[n] = x[y[n]]`.
+    /// # Panics
+    /// If the degree of either of the permutations does not match the degree of the group.
     fn op(&self, x: &Permutation, y: &Permutation) -> Permutation {
         assert_eq!(self.degree, x.degree);
         assert_eq!(self.degree, y.degree);
@@ -318,14 +337,16 @@ impl GroupLike<Permutation> for SymmetricGroup {
             vec: (0..self.degree).map(|n| x[y[n]]).collect(),
         }
     }
-
+    /// Returns the identity permutation 0,1,..,`self.degree - 1` of the symmetric group.
     fn id(&self) -> Permutation {
         Permutation {
             degree: self.degree,
             vec: (0..self.degree).collect(),
         }
     }
-
+    /// Computes the inverse of a permutation such that `self.inv(x)[n] = m` if and only if `self.x[m] = n`.
+    /// # Panics
+    /// If the degree of the permutation does not match the degree of the group.
     fn inv(&self, x: &Permutation) -> Permutation {
         assert_eq!(self.degree, x.degree);
         let mut v: Vec<usize> = vec![0; self.degree];
@@ -358,6 +379,9 @@ impl FiniteGroupLike<Permutation> for SymmetricGroup {
 }
 
 impl OrderGroupLike<Permutation> for SymmetricGroup {
+    /// Computes order via cycle decomposition.
+    /// # Runtime
+    /// Approximately O(n log n).
     fn order_of(&self, x: &Permutation) -> NNInf {
         assert_eq!(self.degree, x.degree);
         let orders = x
@@ -369,6 +393,9 @@ impl OrderGroupLike<Permutation> for SymmetricGroup {
 }
 
 impl ConjugacyGroupLike<Permutation> for SymmetricGroup {
+    /// Check conjugacy of permutations via cycle decomposition and the symmetric group acting on itself.
+    /// # Runtime
+    /// Approximately O(n log n).
     fn are_conjugate(&self, x: &Permutation, y: &Permutation) -> Option<Permutation> {
         assert_eq!(self.degree, x.degree);
         assert_eq!(self.degree, y.degree);
@@ -411,8 +438,6 @@ mod test {
 
     #[test]
     fn conjugacy_test() {
-        //        let c = Permutation::from(&Cycle::new(5, vec![0, 2]).unwrap());
-        //        let d = Permutation::from(&Cycle::new(5, vec![2, 3]).unwrap());
         let c = Permutation::new(5, vec![1, 2, 0, 4, 3]).unwrap();
         let d = Permutation::new(5, vec![1, 4, 3, 2, 0]).unwrap();
         let g = SymmetricGroup { degree: 5 };
@@ -503,11 +528,23 @@ mod test {
              let conj = perm.conjugacy_type();
              assert_eq!(conj.len(),conj.into_iter().count().into());
          }
+
         #[test]
         fn cycle_inv_to_perm_commute((n, cycle) in Cycle::strategy_up_to(256)) {
             let grp = SymmetricGroup { degree: n };
             assert_eq!(Permutation::from(cycle.clone().inv()), grp.inv(&Permutation::from(cycle)));
 
+        }
+    }
+    proptest! {
+
+        #![proptest_config(ProptestConfig::with_cases(5))]
+        #[test]
+        #[cfg_attr(not(feature = "intensive_test"), ignore)]
+        fn symmetric_group_conjugacy_type_hard(perm in Permutation::strategy(10)) {
+             let conj = perm.conjugacy_type();
+             dbg!(conj.len());
+             assert_eq!(conj.len(),conj.into_iter().count().into());
         }
     }
 }

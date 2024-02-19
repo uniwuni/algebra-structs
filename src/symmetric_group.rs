@@ -185,7 +185,7 @@ impl Permutation {
         let mut cycles: Vec<Cycle> = vec![];
         while let Some(&start) = unvisited.iter().min() {
             let mut m: usize = start; // kind of hacky but who care
-            let mut v: Vec<usize> = vec![];
+            let mut v: Vec<usize> = vec![start];
             let mut b: bool = true;
             while m != start || b {
                 b = false;
@@ -193,6 +193,7 @@ impl Permutation {
                 v.push(m);
                 unvisited.remove(&m);
             }
+            v.pop();
             cycles.push(Cycle {
                 degree: self.degree,
                 vec: v,
@@ -533,6 +534,12 @@ mod test {
         fn cycle_inv_to_perm_commute((n, cycle) in Cycle::strategy_up_to(256)) {
             let grp = SymmetricGroup { degree: n };
             assert_eq!(Permutation::from(cycle.clone().inv()), grp.inv(&Permutation::from(cycle)));
+
+        }
+        #[test]
+        fn cycle_decomposes_to_nearly_itself((n, cycle) in Cycle::strategy_up_to(256)) {
+            if cycle.order() > 1 {assert_eq!(Permutation::from(&cycle).decompose_cycle().iter().filter(|a| a.order() != 1).collect::<Vec<_>>(),
+                                 vec![&cycle])};
 
         }
     }

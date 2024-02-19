@@ -100,7 +100,7 @@ impl Cycle {
     /// Proptest [`Strategy`] to generate cycles.
     /// Not really uniform, but uniform in cycle length and per length uniform in value.
     pub fn strategy(degree: usize) -> impl Strategy<Value = Self> {
-        (0..degree).prop_perturb(move |n, mut rng| {
+        (0..=degree).prop_perturb(move |n, mut rng| {
             let mut vec: Vec<usize> = (0..degree).collect();
             vec.shuffle(&mut rng);
             vec.truncate(n);
@@ -236,8 +236,8 @@ impl ConjugacyType {
     fn make_from_remaining(
         degree: usize,
         cycles: Vec<usize>,
-        remaining: &HashSet<usize>,
-    ) -> impl Iterator<Item = Vec<Cycle>> + '_ {
+        remaining: HashSet<usize>,
+    ) -> impl Iterator<Item = Vec<Cycle>>  {
         let mut cycles = cycles;
         if remaining.is_empty() {
             itertools::Either::Left(std::iter::once(SymmetricGroup { degree }.id().decompose_cycle()))
@@ -246,16 +246,16 @@ impl ConjugacyType {
             if len == 0 {
                 return itertools::Either::Left(std::iter::once(vec![]));
             }
-            let options: itertools::Unique<_> = remaining
-                .iter()
+            let options: itertools::Unique<_> = remaining.clone()
+                .into_iter()
                 .permutations(len)
-                .map(move |x| Cycle::new_no_check(degree, x.iter().copied().copied().collect()))
+                .map(move |x| Cycle::new_no_check(degree, x.iter().copied().collect()))
                 .unique();
             itertools::Either::Right(options
                 .flat_map(move |x| {
                     let new_remaining =
-                        remaining - &x.vec.iter().copied().collect::<HashSet<usize>>();
-                    let mut res: Vec<_> = Self::make_from_remaining(degree, cycles.clone(), &new_remaining).collect();
+                        &remaining.clone() - &x.vec.iter().copied().collect::<HashSet<usize>>();
+                    let mut res: Vec<_> = Self::make_from_remaining(degree, cycles.clone(), new_remaining).collect();
                     for m in &mut res {
                         m.push(x.clone());
                     }
@@ -285,7 +285,7 @@ impl IntoIterator for ConjugacyType {
 
     fn into_iter(self) -> Self::IntoIter {
         let range: HashSet<usize> = (0..self.degree).collect();
-        Box::new(Self::make_from_remaining(self.degree, self.uncount(), &range)
+        Box::new(Self::make_from_remaining(self.degree, self.uncount(),range)
             .map(move |a| {
                 let s = SymmetricGroup {
                     degree: self.degree,
@@ -501,7 +501,7 @@ mod test {
         #[test]
          fn symmetric_group_conjugacy_type_size((_, perm) in Permutation::strategy_up_to(9)) {
              let conj = perm.conjugacy_type();
-             assert_eq!(conj.len(),conj.into_iter().len().into());
+             assert_eq!(conj.len(),conj.into_iter().count().into());
          }
         #[test]
         fn cycle_inv_to_perm_commute((n, cycle) in Cycle::strategy_up_to(256)) {

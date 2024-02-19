@@ -1,57 +1,58 @@
-use std::collections::HashSet;
-use std::collections::VecDeque;
-use num::BigInt;
-use num::BigUint;
 use num::bigint::ToBigInt;
 use num::bigint::ToBigUint;
+use num::BigInt;
+use num::BigUint;
 use num_traits::One;
 use num_traits::Zero;
 use proptest::prelude::*;
 use proptest::test_runner::*;
+use std::collections::HashSet;
+use std::collections::VecDeque;
 
 pub trait GroupLike<A> {
     fn op(&self, x: &A, y: &A) -> A;
     fn id(&self) -> A;
     fn inv(&self, x: &A) -> A;
-    fn power(&self, x: &A, n: i64) -> A where A: Clone {
+    fn power(&self, x: &A, n: i64) -> A
+    where
+        A: Clone,
+    {
         if n == 0 {
             self.id()
         } else if n < 0 {
             self.power(&self.inv(x), -n)
+        } else if n == 1 {
+            x.clone()
+        } else if n % 2 == 0 {
+            self.power(&self.op(x, x), n / 2)
         } else {
-            if n == 1 {
-                x.clone()
-            } else {
-                if n % 2 == 0 {
-                    self.power(&self.op(x, x), n / 2)
-                } else {
-                    self.op(x, &self.power(&self.op(x, x), n / 2))
-                }
-            }
+            self.op(x, &self.power(&self.op(x, x), n / 2))
         }
     }
-    fn power_bigint(&self, x: &A, n: BigInt) -> A where A: Clone {
+    fn power_bigint(&self, x: &A, n: BigInt) -> A
+    where
+        A: Clone,
+    {
         if n == Zero::zero() {
             self.id()
         } else if n < Zero::zero() {
             self.power_bigint(&self.inv(x), (-1) * n)
+        } else if n == One::one() {
+            x.clone()
+        } else if n.clone() % 2 == Zero::zero() {
+            self.power_bigint(&self.op(x, x), n / 2_i8.to_bigint().unwrap())
         } else {
-            if n == One::one() {
-                x.clone()
-            } else {
-                if n.clone() % 2 == Zero::zero() {
-                    self.power_bigint(&self.op(x, x), n / 2_i8.to_bigint().unwrap())
-                } else {
-                    self.op(x, &self.power_bigint(&self.op(x, x), n / 2_i8.to_bigint().unwrap()))
-                }
-            }
+            self.op(
+                x,
+                &self.power_bigint(&self.op(x, x), n / 2_i8.to_bigint().unwrap()),
+            )
         }
     }
 }
 
 pub enum NNInf {
     Fin(BigUint),
-    Inf
+    Inf,
 }
 
 pub trait OrderGroupLike<A>: GroupLike<A> {
@@ -69,15 +70,18 @@ pub trait FiniteGroupLike<A>: GroupLike<A> {
         all.len().into()
     }
     fn all_elements(&self) -> HashSet<A>;
-    fn bruteforce_order_of(&self, x: A) -> NNInf where A : Clone + PartialEq{
-      let mut y = x.clone();
-      let mut n: u64 = 0;
-      while y != self.id() {
-          y = self.op(&y,&x);
-          n += 1;
-      }
-      NNInf::Fin(n.to_biguint().unwrap())
-  }
+    fn bruteforce_order_of(&self, x: A) -> NNInf
+    where
+        A: Clone + PartialEq,
+    {
+        let mut y = x.clone();
+        let mut n: u64 = 0;
+        while y != self.id() {
+            y = self.op(&y, &x);
+            n += 1;
+        }
+        NNInf::Fin(n.to_biguint().unwrap())
+    }
 }
 
 pub struct Group<A> {
@@ -162,11 +166,11 @@ impl<A: Clone + Eq + std::fmt::Debug> Group<A> {
         if let Err(TestError::Fail(_, x)) = inv_right_result {
             return Err(GroupError::NotInvertibleRight(x));
         }
-        return Ok(Group {
+        Ok(Group {
             op_fun: op,
             id_val: id,
             inv_fun: inv,
-        });
+        })
     }
 }
 
@@ -240,7 +244,12 @@ where
                 continue;
             } else {
                 elems.insert(x.clone());
-                queue.extend(self.fin_gen_group.generators.iter().map(|s| self.op(&x, &s)));
+                queue.extend(
+                    self.fin_gen_group
+                        .generators
+                        .iter()
+                        .map(|s| self.op(&x, s)),
+                );
             }
         }
         elems
@@ -298,6 +307,6 @@ mod test {
                 generators: vec![[1, 0, 2], [2, 1, 0]],
             },
         };
-        assert_eq!(finite_grp_sym_3.order(), BigUint::from(6 as u8));
+        assert_eq!(finite_grp_sym_3.order(), BigUint::from(6_u8));
     }
 }

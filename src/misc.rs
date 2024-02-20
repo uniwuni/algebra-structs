@@ -6,3 +6,9 @@ pub enum NNInf {
     Fin(BigUint),
     Inf,
 }
+
+/// Types of subgroups, subrings, etc.
+pub trait Subobject<A, B> {
+    /// Return the ambient structure `self` is a substructure of.
+    fn ambient(&self) -> B;
+}

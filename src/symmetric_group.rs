@@ -555,3 +555,30 @@ mod test {
         }
     }
 }
+
+
+/// Subgroups of symmetric groups.
+/// To make pretty much any algorithm viable, this needs to store all its elements.
+/// In the cases where this would be an issue, computing anything about the group would be problematic either way.
+pub struct PermutationSubgroup {
+    ambient: SymmetricGroup,
+    gens: Vec<Permutation>,
+    elems: HashSet<Permutation>
+}
+
+impl GroupLike<Permutation> for PermutationSubgroup {
+    fn op(&self, x: &Permutation, y: &Permutation) -> Permutation {
+        assert!(self.elems.contains(x));
+        assert!(self.elems.contains(y));
+        self.ambient.op(x,y)
+    }
+
+    fn id(&self) -> Permutation {
+        self.ambient.id()
+    }
+
+    fn inv(&self, x: &Permutation) -> Permutation {
+        assert!(self.elems.contains(x));
+        self.ambient.inv(x)
+    }
+}

@@ -3,7 +3,7 @@ use num::{bigint::ToBigUint, BigUint, Integer};
 use num_traits::One;
 use proptest::strategy::Strategy;
 
-use crate::misc::NNInf;
+use crate::misc::{NNInf, Subobject, vec_is_subset_iterator};
 
 use super::group::*;
 use rand::seq::SliceRandom;
@@ -385,11 +385,14 @@ impl OrderGroupLike<Permutation> for SymmetricGroup {
     /// Approximately O(n log n).
     fn order_of(&self, x: &Permutation) -> NNInf {
         assert_eq!(self.degree, x.degree);
+        if x == &self.id() {
+            return NNInf::Fin(num_traits::Zero::zero())
+        }
         let orders = x
             .decompose_cycle()
             .into_iter()
-            .map(|a| a.order().to_biguint().unwrap());
-        NNInf::Fin(orders.fold(num_traits::Zero::zero(), |x, y: BigUint| y.lcm(&x)))
+            .map(|a| BigUint::from(a.order()));
+        NNInf::Fin(orders.fold(num_traits::One::one(), |x, y: BigUint| y.lcm(&x)))
     }
 }
 
@@ -537,7 +540,7 @@ mod test {
 
         }
         #[test]
-        fn cycle_decomposes_to_nearly_itself((n, cycle) in Cycle::strategy_up_to(256)) {
+        fn cycle_decomposes_to_nearly_itself((_, cycle) in Cycle::strategy_up_to(256)) {
             if cycle.order() > 1 {assert_eq!(Permutation::from(&cycle).decompose_cycle().iter().filter(|a| a.order() != 1).collect::<Vec<_>>(),
                                  vec![&cycle])};
 
@@ -557,6 +560,7 @@ mod test {
 }
 
 
+#[derive(Clone, Debug)]
 /// Subgroups of symmetric groups.
 /// To make pretty much any algorithm viable, this needs to store all its elements.
 /// In the cases where this would be an issue, computing anything about the group would be problematic either way.
@@ -565,6 +569,14 @@ pub struct PermutationSubgroup {
     gens: Vec<Permutation>,
     elems: HashSet<Permutation>
 }
+
+impl PartialEq for PermutationSubgroup {
+    fn eq(&self, other: &Self) -> bool {
+        self.ambient == other.ambient && self.elems == other.elems
+    }
+}
+
+impl Eq for PermutationSubgroup { }
 
 impl GroupLike<Permutation> for PermutationSubgroup {
     fn op(&self, x: &Permutation, y: &Permutation) -> Permutation {
@@ -581,4 +593,112 @@ impl GroupLike<Permutation> for PermutationSubgroup {
         assert!(self.elems.contains(x));
         self.ambient.inv(x)
     }
+}
+
+impl Subobject<Permutation, SymmetricGroup> for PermutationSubgroup {
+    fn ambient(&self) -> SymmetricGroup {
+        self.ambient
+    }
+}
+#[derive(Debug, Eq, Ord, Hash, PartialEq, PartialOrd)]
+pub enum SwapGeneratorsError {
+    NotGenerating
+}
+
+impl PermutationSubgroup {
+    pub fn from_gens(ambient: SymmetricGroup, gens: Vec<Permutation>) -> Self {
+        Self {
+            ambient,
+            elems: GroupGenIter::new(Box::new(&ambient), &gens).collect(),
+            gens,
+        }
+    }
+    pub fn swap_gens(self, new_gens: Vec<Permutation>) -> Result<PermutationSubgroup, SwapGeneratorsError>{
+        if vec_is_subset_iterator(&self.gens, GroupGenIter::new(Box::new(&self.ambient), &new_gens)) {
+            Ok (Self {
+            ambient: self.ambient,
+            elems: self.elems,
+            gens: new_gens
+            })
+        } else {
+            Err(SwapGeneratorsError::NotGenerating)
+        }
+    }
+}
+
+impl FiniteGroupLike<Permutation> for PermutationSubgroup {
+    fn all_elements(&self) -> impl Iterator<Item = Permutation> {
+        self.elems.clone().into_iter()
+    }
+}
+
+impl OrderGroupLike<Permutation> for PermutationSubgroup {
+    fn order_of(&self, x: &Permutation) -> NNInf {
+        self.ambient.order_of(x)
+    }
+}
+
+impl SymmetricGroup {
+    /// Converts a symmetric group into the trivial subgroup of itself using the generating set of all cycles (0i).
+    pub fn into_subgroup(self) -> PermutationSubgroup {
+        PermutationSubgroup { ambient: self.clone(),
+                              gens: (1..self.degree).map(|n|
+                                                         (Cycle { degree: self.degree,
+                                                                  vec: vec![0, n] }).into()).collect(),
+                              elems: self.all_elements().collect() }
+    }
+}
+
+impl ConjugacyGroupLike<Permutation> for PermutationSubgroup {
+    /// Check for conjugacy by a mix of brute force and symmetric conjugacy.
+    /// If two elements in a subgroup are conjugate, they are also conjugate in the ambient group.
+    /// This allows one to quickly refute conjugacy in many cases.
+    fn are_conjugate(&self, x: &Permutation, y: &Permutation) -> Option<Permutation> {
+        assert!(self.elems.contains(x));
+        assert!(self.elems.contains(y));
+        if self.ambient.are_conjugate(x, y).is_none() {
+            None
+        } else {
+            let g = self.ambient;
+            for a in &self.elems {
+                if &g.op(&a, &g.op(&x, &g.inv(&a))) == y {
+                    return Some(a.clone());
+                }
+            }
+            None
+        }
+    }
+}
+
+mod test_subgroup {
+    use super::*;
+    #[test]
+    fn alternating_degree_3() {
+        let grp = SymmetricGroup { degree: 3 };
+        let gens = vec![Cycle::new(3, vec![0,1,2]).unwrap().into()];
+        let gens2 = vec![Cycle::new(3, vec![0,1,2]).unwrap().into()];
+        let subgrp = PermutationSubgroup::from_gens(grp, gens);
+        let subgrp2 = subgrp.clone().swap_gens(gens2.clone()).unwrap();
+        let subgrp3 = PermutationSubgroup::from_gens(grp, gens2);
+        assert_eq!(subgrp, subgrp2);
+        assert_eq!(subgrp, subgrp3)
+    }
+
+    #[test]
+    fn klein_group() {
+        let grp = SymmetricGroup { degree: 4 };
+        let gens = vec![Permutation::new(4, vec![1,0,3,2]).unwrap(), Permutation::new(4, vec![3,2,1,0]).unwrap()];
+        let four_grp = PermutationSubgroup::from_gens(grp, gens);
+        assert_eq!(four_grp.order(), BigUint::from(4u8));
+        for i in four_grp.elems.iter() {
+            if i != &four_grp.id() {
+                assert_eq!(grp.order_of(&i), NNInf::Fin(BigUint::from(2u8)));
+            }
+        }
+        for (i,j) in four_grp.elems.iter().tuple_combinations() {
+            assert_eq!(four_grp.are_conjugate(i, j), None);
+        }
+    }
+
+
 }

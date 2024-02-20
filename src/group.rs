@@ -55,6 +55,29 @@ pub trait GroupLike<A> {
     }
 }
 
+
+/// Type whose elements are subgroups of the associated type.
+/// Make sure that the elements are actually closed under the operation etc. when implementing this.
+pub trait SubgroupLike<A> {
+    type AmbientGroups: GroupLike<A>;
+    fn ambient_group(&self) -> Self::AmbientGroups;
+}
+
+// impl<A, B, C> GroupLike<A> for C where C: SubgroupLike<A, AmbientGroups = B> {
+//     fn op(&self, x: &A, y: &A) -> A {
+//        self.ambient_group().op(x, y)
+//     }
+
+//     fn id(&self) -> A {
+//         self.ambient_group().id()
+//     }
+
+//     fn inv(&self, x: &A) -> A {
+//         self.ambient_group().inv(x);
+//     }
+// }
+
+
 /// Type whose elements are groups that also allow you to compute the order of an element.
 /// Note that this does apply to all finite groups, but there is no blanket implementation
 /// due to the performance cost and since usually, faster methods exist.
